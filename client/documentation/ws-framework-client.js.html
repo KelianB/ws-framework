@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Source: ws-framework-client.js</title>
+
+    <script src="scripts/prettify/prettify.js"> </script>
+    <script src="scripts/prettify/lang-css.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify-tomorrow.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+
+    <h1 class="page-title">Source: ws-framework-client.js</h1>
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>/** An enumeration of websocket states (CONNECTING, OPEN, CLOSING, CLOSED). */
+var WEBSOCKET_STATE = {
+    CONNECTING: 0,
+	OPEN: 1,
+	CLOSING: 2,
+	CLOSED: 3
+};
+
+/** An enumeration of websocket errors (TIMEOUT, CONNECTION_FAILED, UNKNOWN). */
+var WEBSOCKET_ERROR = {
+    TIMEOUT: 0,
+    CONNECTION_FAILED: 1,
+    UNKNOWN: 2
+};
+    
+/** Initiates the client-side Websocket Framework.
+ * @class
+ * @classdesc A class that helps dealing with websocket communication between a client and a server.
+ * @param {Object} config - The configuration of the framework.
+ * @param {Object} [config.server] - The information required to reach the server.
+ * @param {String} [config.server.ip=localhost] - The server IP.
+ * @param {Integer} [config.server.port=49111] - The server port.
+ * @param {Integer} [config.pingInterval=5000] - The interval at which the client will ping the server, in milliseconds.
+ * @param {Integer} [config.abortDelay=10000] - The delay after which the client will abort the connection attempt with the server if it hasn't succeeded, in milliseconds.
+ * @param {Integer} [config.timeoutDelay=10000] - The delay after which the client will timeout if the ping hasn't received a response, in milliseconds.
+ * @param {Function} [config.onClose] - A function that will be called when the connection with the server is closed.
+ * @param {Function} [config.onOpen] - A function that will be called when the connection with the server is opened.
+ * @param {Function} [config.onError] - A function that will be called if the framework raises an error at any point (params: errorId, [reason]).
+ * @param {Function} [config.onPacket] - A function that will be called when the client receives a packet from the server.
+ * @param {Function} [config.onConnectionSuccessful] - A function that will be called after the handshake, when the server has authorized the connection.
+ */ 
+function WebsocketFrameworkClient(config) {
+    var that = this;
+    this.config = {};
+    
+    var defaults = {
+        server: {ip: "localhost", port: 49111},
+        pingInterval: 5000,
+        abortDelay: 10000,
+        timeoutDelay: 10000,
+        onClose: function() {},
+        onOpen: function() {},
+        onError: function(error) {},
+        onPacket: function() {},
+        onConnectionSuccessful: function() {}
+    };
+
+    for(var key in defaults)
+        this.config[key] = config[key] || defaults[key];
+    
+    this.socket = null;
+
+    this.PING_NEVER = -1;
+    this.TIMEOUT_NONE = -1;
+
+    this.wsUri = "wss://" + this.config.server.ip + ":" + this.config.server.port;
+    
+    this.connected = false;
+    this.clientID = -1;
+    this.pingHistory = [];
+    
+    var lastPingTime = Date.now(), pingTimeout = -1;
+    
+    /** Gets the current state of the socket.
+     * @returns {Integer} The socket state.
+     */
+    this.getState = function() {
+        return this.socket.readyState;
+    };
+    
+    /** Connects to the server specified in config.server. */ 
+    this.connect = function() {
+         // Initialize the socket
+        this.socket = new WebSocket(this.wsUri);
+
+        // If we're still trying to connect to the server after abortDelay, abort the connection.
+        setTimeout(function() {
+        	// Check if websocket is still trying
+        	if(that.socket.readyState == WEBSOCKET_STATE.CONNECTING)
+        		that.config.onError(WEBSOCKET_ERROR.CONNECTION_FAILED);
+        }, this.config.abortDelay);
+        
+        // Add listeners
+        this.socket.onclose = function(e) {that.config.onClose(e);};
+        this.socket.onopen = function(e) {that.config.onOpen(e);};
+        this.socket.onerror = function(e) {
+            that.config.onError(WEBSOCKET_ERROR.UNKNOWN, e);
+            that.connected = false;
+        };
+        this.socket.onmessage = function(e) {
+            var packet = JSON.parse(e.data);
+
+            switch(packet.type) {
+            	case "handshake":
+            	   if(packet.data.successful) {
+                        that.clientID = packet.data.clientID;
+                        that.connected = true;
+                        that.config.onConnectionSuccessful(packet.data);
+                        
+                        // Start ping interval
+                        if(that.config.pingInterval != that.PING_NEVER)
+                        	setInterval(that.ping, that.config.pingInterval);
+                    }
+                    else
+                        that.config.onError(WEBSOCKET_ERROR.CONNECTION_FAILED, packet.data.reason);
+            		break;
+                case "pong":
+                    // Handle pinging
+                	clearTimeout(pingTimeout);
+                	pingTimeout = -1;
+                	that.pingHistory.push(Date.now() - lastPingTime);
+                	break;
+            }
+            
+            that.config.onPacket(packet);
+        };
+    };
+    
+    /** Closes the connection with the server.
+     * @param {String} reason - The reason for the disconnection.
+     */
+    this.closeConnection = function(reason) {
+    	that.connected = false;
+        that.sendPacket("close-connection", {reason: reason});
+    };
+    
+    /** Sends a packet to the server.
+     * @param {String} type - The type of the packet which is used by the server to know what to do with it.
+     * @param {Object} data - An object containing the data to send with the packet.
+     * @returns {Boolean} Whether or not the packet has been sent.
+     */ 
+    this.sendPacket = function(type, data) { 
+        // Check if the packet can be sent
+        if(!this.socket || this.socket.readyState != WEBSOCKET_STATE.OPEN || !this.connected)
+            return false;
+        
+        // Build the packet object
+        var packet = {type: type};
+        if(data)
+        	packet.data = data;
+    
+        console.log("[SEND] " + type);
+    
+        try {
+            // Send the packet
+            this.socket.send(JSON.stringify(packet));
+            return true;
+        } 
+        catch(e) {
+            return false;
+        }
+    };
+    
+    /** Sends a ping packet to the server. */
+    this.ping = function() {
+        // Abort if there is already a ping that hasn't received a response.
+    	if(pingTimeout != -1)
+        	return;
+
+    	// Store sending time
+    	lastPingTime = Date.now();
+    	
+    	// Creates a timeout that will be cleared when the client receives a "pong" packet from the server.
+    	if(that.config.timeoutDelay != that.TIMEOUT_NONE) {
+        	pingTimeout = setTimeout(function() {
+        		if(that.connected)
+        			that.config.onError(WEBSOCKET_ERROR.TIMEOUT);
+        	}, that.config.timeoutDelay);
+    	}
+    	
+    	that.sendPacket("ping");
+    };
+    
+    // Handle disconnection when the page is left.
+    window.addEventListener("beforeunload", function() {
+        that.closeConnection("page-exit");
+    });
+}
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+</div>
+
+<nav>
+    <h2><a href="index.html">Home</a></h2><h3>Classes</h3><ul><li><a href="WebsocketFrameworkClient.html">WebsocketFrameworkClient</a></li></ul><h3>Global</h3><ul><li><a href="global.html#WEBSOCKET_ERROR">WEBSOCKET_ERROR</a></li><li><a href="global.html#WEBSOCKET_STATE">WEBSOCKET_STATE</a></li></ul>
+</nav>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.4.0</a> on Thu Aug 18 2016 09:09:23 GMT+0000 (UTC)
+</footer>
+
+<script> prettyPrint(); </script>
+<script src="scripts/linenumber.js"> </script>
+</body>
+</html>
