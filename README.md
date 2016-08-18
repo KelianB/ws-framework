@@ -2,7 +2,7 @@
 Client and server frameworks that simplify dealing with JS websockets.
 
 ## Client Example
-
+```javascript
 var wfc = new WebsocketFrameworkClient({
     server: {ip: "localhost", port: 4242},
     pingInterval: 8000,
