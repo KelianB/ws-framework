@@ -12,7 +12,7 @@ var WEBSOCKET_ERROR = {
     CONNECTION_FAILED: 1,
     UNKNOWN: 2
 };
-    
+
 /** Initiates the client-side Websocket Framework.
  * @class
  * @classdesc A class that helps dealing with websocket communication between a client and a server.
@@ -26,13 +26,13 @@ var WEBSOCKET_ERROR = {
  * @param {Function} [config.onClose] - A function that will be called when the connection with the server is closed.
  * @param {Function} [config.onOpen] - A function that will be called when the connection with the server is opened.
  * @param {Function} [config.onError] - A function that will be called if the framework raises an error at any point (params: errorId, [reason]).
- * @param {Function} [config.onPacket] - A function that will be called when the client receives a packet from the server.
+ * @param {Function} [config.onPacket] - A function that will be called when the client receives a packet from the server (params: type, data).
  * @param {Function} [config.onConnectionSuccessful] - A function that will be called after the handshake, when the server has authorized the connection.
- */ 
+ */
 function WebsocketFrameworkClient(config) {
     var that = this;
     this.config = {};
-    
+
     var defaults = {
         server: {ip: "localhost", port: 49111},
         pingInterval: 5000,
@@ -47,28 +47,28 @@ function WebsocketFrameworkClient(config) {
 
     for(var key in defaults)
         this.config[key] = config[key] || defaults[key];
-    
+
     this.socket = null;
 
     this.PING_NEVER = -1;
     this.TIMEOUT_NONE = -1;
 
     this.wsUri = "wss://" + this.config.server.ip + ":" + this.config.server.port;
-    
+
     this.connected = false;
     this.clientID = -1;
     this.pingHistory = [];
-    
+
     var lastPingTime = Date.now(), pingTimeout = -1;
-    
+
     /** Gets the current state of the socket.
      * @returns {Integer} The socket state.
      */
     this.getState = function() {
         return this.socket.readyState;
     };
-    
-    /** Connects to the server specified in config.server. */ 
+
+    /** Connects to the server specified in config.server. */
     this.connect = function() {
          // Initialize the socket
         this.socket = new WebSocket(this.wsUri);
@@ -79,7 +79,7 @@ function WebsocketFrameworkClient(config) {
         	if(that.socket.readyState == WEBSOCKET_STATE.CONNECTING)
         		that.config.onError(WEBSOCKET_ERROR.CONNECTION_FAILED);
         }, this.config.abortDelay);
-        
+
         // Add listeners
         this.socket.onclose = function(e) {that.config.onClose(e);};
         this.socket.onopen = function(e) {that.config.onOpen(e);};
@@ -96,7 +96,7 @@ function WebsocketFrameworkClient(config) {
                         that.clientID = packet.data.clientID;
                         that.connected = true;
                         that.config.onConnectionSuccessful(packet.data);
-                        
+
                         // Start ping interval
                         if(that.config.pingInterval != that.PING_NEVER)
                         	setInterval(that.ping, that.config.pingInterval);
@@ -111,11 +111,11 @@ function WebsocketFrameworkClient(config) {
                 	that.pingHistory.push(Date.now() - lastPingTime);
                 	break;
             }
-            
+
             that.config.onPacket(packet);
         };
     };
-    
+
     /** Closes the connection with the server.
      * @param {String} reason - The reason for the disconnection.
      */
@@ -123,34 +123,34 @@ function WebsocketFrameworkClient(config) {
     	that.connected = false;
         that.sendPacket("close-connection", {reason: reason});
     };
-    
+
     /** Sends a packet to the server.
      * @param {String} type - The type of the packet which is used by the server to know what to do with it.
      * @param {Object} data - An object containing the data to send with the packet.
      * @returns {Boolean} Whether or not the packet has been sent.
-     */ 
-    this.sendPacket = function(type, data) { 
+     */
+    this.sendPacket = function(type, data) {
         // Check if the packet can be sent
         if(!this.socket || this.socket.readyState != WEBSOCKET_STATE.OPEN || !this.connected)
             return false;
-        
+
         // Build the packet object
         var packet = {type: type};
         if(data)
         	packet.data = data;
-    
+
         console.log("[SEND] " + type);
-    
+
         try {
             // Send the packet
             this.socket.send(JSON.stringify(packet));
             return true;
-        } 
+        }
         catch(e) {
             return false;
         }
     };
-    
+
     /** Sends a ping packet to the server. */
     this.ping = function() {
         // Abort if there is already a ping that hasn't received a response.
@@ -159,7 +159,7 @@ function WebsocketFrameworkClient(config) {
 
     	// Store sending time
     	lastPingTime = Date.now();
-    	
+
     	// Creates a timeout that will be cleared when the client receives a "pong" packet from the server.
     	if(that.config.timeoutDelay != that.TIMEOUT_NONE) {
         	pingTimeout = setTimeout(function() {
@@ -167,10 +167,10 @@ function WebsocketFrameworkClient(config) {
         			that.config.onError(WEBSOCKET_ERROR.TIMEOUT);
         	}, that.config.timeoutDelay);
     	}
-    	
+
     	that.sendPacket("ping");
     };
-    
+
     // Handle disconnection when the page is left.
     window.addEventListener("beforeunload", function() {
         that.closeConnection("page-exit");
