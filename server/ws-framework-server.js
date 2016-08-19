@@ -8,11 +8,10 @@
  * @param {Function} [config.onConnectionAttempt] - A function that will be called when a client tries to connect (params: user). Can return an object: {successful: true/false, reason: ""}.
  * @param {Function} [config.onConnection] - A function that will be called when the connection with a client has been opened and authorized (params: user).
  * @param {Function} [config.onConnectionClosed] - A function that will be called when the connection with a client has been closed (params: user, data).
+ * @param {Function} [config.onServerReady] - A function that will be called when the server has been initialized and is ready to receive connections.
  * @param {Function} [config.onPacket] - A function that will be called when the server receives a packet from a client (params: type, data).
  */
 function WebsocketFrameworkServer(config) {
-    console.log("Initializing server...");
-
     var that = this;
     this.config = {};
 
@@ -22,6 +21,7 @@ function WebsocketFrameworkServer(config) {
         onConnectionAttempt: function() {},
         onConnection: function() {},
         onConnectionClosed: function() {},
+        onServerReady: function() {},
         onPacket: function() {},
         timeoutDelay: 5000
     };
@@ -40,7 +40,9 @@ function WebsocketFrameworkServer(config) {
     // Initialize websocket
     this.socket = new WebSocket({port: this.config.port});
 
-    console.log("Server running (Port: " + this.config.port + ").");
+    this.config.onServerReady();
+
+    console.log("Server running (port: " + this.config.port + ").");
 
     // Add connection listener
     this.socket.on("connection", function(client) {
