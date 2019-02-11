@@ -44,7 +44,7 @@ class WebsocketFrameworkServer {
       console.log("Server running (port: " + this.config.port + ").");
 
       // Add connection listener
-      this.socket.on("connection", this._onConnectionEstablished);
+      this.socket.on("connection", (client) => {this._onConnectionEstablished(client)});
     }
 
     _onConnectionEstablished(client) {
@@ -73,12 +73,12 @@ class WebsocketFrameworkServer {
          console.log(user.ip + " is now connected.");
 
          // Receives packet
-         user.client.on("message", this._onPacketReceived);
+         user.client.on("message", (packet) => {this._onPacketReceived(user, packet)});
       }
       user.sendPacket("handshake", connection);
    }
 
-   _onPacketReceived(packet) {
+   _onPacketReceived(user, packet) {
       console.log("[RECEIVED] " + packet);
       try {
          packet = JSON.parse(packet);
@@ -96,7 +96,7 @@ class WebsocketFrameworkServer {
             break;
          }
          case "ping": {
-            this.sendPacket("pong");
+            user.sendPacket("pong");
             user._handlePingTimeout();
             break;
          }
@@ -134,11 +134,6 @@ class WebsocketFrameworkServer {
     }
 }
 
-function pad(str, max) {
-    str = str.toString();
-    return str.length < max ? pad(str + " ", max) : str;
-}
-
 /** Stores a user for the server websocket framework. This constructor is only used internally by the framework.
  * @param {WebsocketFrameworkServer} wfs - An instance of the server websocket framework.
  * @param {Websocket-Client} client - The client that corresponds to this user.
@@ -150,6 +145,8 @@ class User {
       this.id = id;
       this.ip = client._socket.remoteAddress;
       this.connected = false;
+
+      this.wfs = wfs;
    }
 
    /** Sends a packet to this client.
@@ -165,21 +162,20 @@ class User {
       console.log("[SEND] " + type + " to " + this.ip);
 
       try {
-         client.send(JSON.stringify(packet)); // Format and send the packet
+         this.client.send(JSON.stringify(packet)); // Format and send the packet
       }
-      catch(e) {
+      catch(e) {}
    }
 
    // Only used internally - called when a ping packet has been received.
    _handlePingTimeout() {
       clearTimeout(this.pingTimeout);
-      let self = this;
 
       this.pingTimeout = setTimeout(() => {
          // Remove client
-          wfs.removeUser(self, {reason: "timeout"});
-         console.log(self.ip + " timed out!");
-      }, wfs.config.timeoutDelay)
+          this.wfs.removeUser(this, {reason: "timeout"});
+         console.log(this.ip + " timed out!");
+      }, this.wfs.config.timeoutDelay)
    }
 }
 
