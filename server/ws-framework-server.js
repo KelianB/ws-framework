@@ -11,106 +11,111 @@
  * @param {Function} [config.onServerReady] - A function that will be called when the server has been initialized and is ready to receive connections.
  * @param {Function} [config.onPacket] - A function that will be called when the server receives a packet from a client (params: type, data).
  */
-function WebsocketFrameworkServer(config) {
-    var that = this;
-    this.config = {};
+class WebsocketFrameworkServer {
+   constructor(config) {
+      this.CLIENTS_INFINITE = -1;
 
-    var defaults = {
-        maxClients: this.CLIENTS_INFINITE,
-        port: 8082,
-        onConnectionAttempt: function() {},
-        onConnection: function() {},
-        onConnectionClosed: function() {},
-        onServerReady: function() {},
-        onPacket: function() {},
-        timeoutDelay: 5000
-    };
+      const DEFAULT_CONFIG = {
+         maxClients: this.CLIENTS_INFINITE,
+         port: 8082,
+         onConnectionAttempt: function() {},
+         onConnection: function() {},
+         onConnectionClosed: function() {},
+         onServerReady: function() {},
+         onPacket: function() {},
+         timeoutDelay: 5000
+      };
 
-    for(var key in defaults)
-        this.config[key] = config[key] || defaults[key];
+      this.config = {};
+      for(let key in DEFAULT_CONFIG)
+         this.config[key] = config[key] || DEFAULT_CONFIG[key];
 
-    this.CLIENTS_INFINITE = -1;
+      this.socket = null;
+      this.users = [];
 
-    this.socket = null;
-    this.users = [];
+      let WebSocket = require("ws").Server;
+      this.currentClientID = 0;
 
-    var WebSocket = require("ws").Server;
-    var currentClientID = 0;
+      // Initialize websocket
+      this.socket = new WebSocket({port: this.config.port});
 
-    // Initialize websocket
-    this.socket = new WebSocket({port: this.config.port});
+      this.config.onServerReady();
 
-    this.config.onServerReady();
+      console.log("Server running (port: " + this.config.port + ").");
 
-    console.log("Server running (port: " + this.config.port + ").");
+      // Add connection listener
+      this.socket.on("connection", this._onConnectionEstablished);
+    }
 
-    // Add connection listener
-    this.socket.on("connection", function(client) {
-        var user = new User(that, client, currentClientID++);
+    _onConnectionEstablished(client) {
+      let user = new User(this, client, this.currentClientID++);
 
-        console.log("New connection attempt from " + user.ip);
+      console.log("New connection attempt from " + user.ip);
 
-        var connection = {successful: true, reason: ""};
+      let connection = {successful: true, reason: ""};
 
-        // Check if the maximum amount of clients has already been reached.
-        if(that.config.maxClients != that.CLIENTS_INFINITE && that.users.length >= that.config.maxClients) {
-            connection.successful = false;
-            connection.reason = "server-full";
-        }
+      // Check if the maximum amount of clients has already been reached.
+      if(this.config.maxClients != this.CLIENTS_INFINITE && this.users.length >= this.config.maxClients) {
+         connection.successful = false;
+         connection.reason = "server-full";
+      }
 
-        if(connection.successful)
-            connection = that.config.onConnectionAttempt(user) || connection;
+      if(connection.successful)
+         connection = this.config.onConnectionAttempt(user) || connection;
 
-        if(connection.successful) {
-        	user.connected = true;
-            that.users.push(user);
-            that.config.onConnection(user);
+      if(connection.successful) {
+         user.connected = true;
+         this.users.push(user);
+         this.config.onConnection(user);
 
-    	    connection.id = user.id;
+         connection.id = user.id;
 
-    	    console.log(user.ip + " is now connected.");
+         console.log(user.ip + " is now connected.");
 
-            // Receives packet
-        	user.client.on("message", function(packet) {
-        	    console.log("[RECEIVED] " + packet);
-            	try {
-            		packet = JSON.parse(packet);
-            	}
-            	catch(e) {
-            		console.log("Cannot parse message: \"" + packet + "\"");
-            		return false;
-            	}
+         // Receives packet
+         user.client.on("message", this._onPacketReceived);
+      }
+      user.sendPacket("handshake", connection);
+   }
 
-            	that.config.onPacket(user, packet);
+   _onPacketReceived(packet) {
+      console.log("[RECEIVED] " + packet);
+      try {
+         packet = JSON.parse(packet);
+      }
+      catch(e) {
+         console.log("Cannot parse message: \"" + packet + "\"");
+         return false;
+      }
 
-            	switch(packet.type) {
-                    case "close-connection":
-                        that.removeUser(user, packet.data);
-                        break;
-                    case "ping":
-                    	user.sendPacket("pong");
-                    	user.handlePingTimeout();
-                    	break;
-                }
-            });
-        }
+      this.config.onPacket(user, packet);
 
-        user.sendPacket("handshake", connection);
-    });
+      switch(packet.type) {
+         case "close-connection": {
+            this.removeUser(user, packet.data);
+            break;
+         }
+         case "ping": {
+            this.sendPacket("pong");
+            user._handlePingTimeout();
+            break;
+         }
+      }
+   }
 
     /** Removes a user from the server.
      * @param {User} user - The user to remove.
      * @param {Object} [data] - A data object that will be a parameter to onConnectionClosed.
      */
-    this.removeUser = function(user, data) {
+    removeUser(user, data) {
         this.users.splice(this.users.indexOf(user), 1);
         user.client.close();
 
         console.log("Removing user " + user.id);
 
         clearTimeout(user.pingTimeout);
-        that.config.onConnectionClosed(user, data || {});
-    };
+        this.config.onConnectionClosed(user, data || {});
+    }
 
     /** Broadcasts a packet to all connected users.
      * @param {String} type - The type of the packet which is used by the client to know what to do with it.
@@ -118,15 +123,15 @@ function WebsocketFrameworkServer(config) {
      * @param [Array] [excludedUsers] - An array of users to which we don't want to send the packet.
      * @param [Array] [targetUsers=all] - An array of users to which we will send the packet.
      */
-    this.broadcast = function(type, data, excludedUsers, targetUsers) {
+    broadcast(type, data, excludedUsers, targetUsers) {
         targetUsers = targetUsers || this.users;
         excludedUsers = excludedUsers || [];
 
-        for(var i = 0; i < targetUsers.length; i++) {
+        for(let i = 0; i < targetUsers.length; i++) {
             if(excludedUsers.indexOf(targetUsers[i]) == -1) // if not excluded
                 targetUsers[i].sendPacket(type, data);
         }
-    };
+    }
 }
 
 function pad(str, max) {
@@ -139,45 +144,43 @@ function pad(str, max) {
  * @param {Websocket-Client} client - The client that corresponds to this user.
  * @param {Integer} id - The ID of this client.
  */
-function User(wfs, client, id) {
-    var that = this;
+class User {
+   constructor(wfs, client, id) {
+      this.client = client;
+      this.id = id;
+      this.ip = client._socket.remoteAddress;
+      this.connected = false;
+   }
 
-    this.client = client;
-    this.id = id;
-    this.ip = client._socket.remoteAddress;
-    this.connected = false;
+   /** Sends a packet to this client.
+   * @param {String} type - The type of the packet which is used by the client to know what to do with it.
+   * @param {Object} data - An object containing the data to send with the packet.
+   */
+   sendPacket(type, data) {
+      // Build packet object
+      let packet = {type: type};
+      if(data)
+         packet.data = data;
 
-    /** Sends a packet to this client.
-     * @param {String} type - The type of the packet which is used by the client to know what to do with it.
-     * @param {Object} data - An object containing the data to send with the packet.
-     */
-    this.sendPacket = function(type, data) {
-        // Build packet object
-        var packet = {type: type};
-	    if(data)
-		    packet.data = data;
+      console.log("[SEND] " + type + " to " + this.ip);
 
-		console.log("[SEND] " + type + " to " + this.ip);
+      try {
+         client.send(JSON.stringify(packet)); // Format and send the packet
+      }
+      catch(e) {
+   }
 
-    	try {
-            // Format and send the packet
-            client.send(JSON.stringify(packet));
-        }
-        catch(e) {
+   // Only used internally - called when a ping packet has been received.
+   _handlePingTimeout() {
+      clearTimeout(this.pingTimeout);
+      let self = this;
 
-        }
-    };
-
-    // Only used internally - called when a ping packet has been received.
-    this.handlePingTimeout = function() {
-        clearTimeout(this.pingTimeout);
-
-        this.pingTimeout = setTimeout(function() {
-            // Remove client
-    	    wfs.removeUser(that, {reason: "timeout"});
-            console.log(that.ip + " timed out!");
-        }, wfs.config.timeoutDelay)
-    };
+      this.pingTimeout = setTimeout(() => {
+         // Remove client
+          wfs.removeUser(self, {reason: "timeout"});
+         console.log(self.ip + " timed out!");
+      }, wfs.config.timeoutDelay)
+   }
 }
 
 module.exports = {WebsocketFrameworkServer: WebsocketFrameworkServer, User: User};
