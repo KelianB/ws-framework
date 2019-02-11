@@ -7,11 +7,9 @@ Download the documentation for both the client and server side for more specific
 ### Client side
 
 ``` javascript
-var wfc = new WebsocketFrameworkClient({
+let wfc = new WebsocketFrameworkClient({
     server: {ip: "localhost", port: 4242},
     onPacket: function(packet) {
-        console.log("[RECEIVED] " + JSON.stringify(packet));
-
         switch(packet.type) {
             case "hello-world":
                 console.log("Hello World! " + packet.data.random);
@@ -25,11 +23,11 @@ wfc.connect();
 ### Server side
 
 ``` javascript
-var WfsModule = require("ws-framework-server.js"),
+let WfsModule = require("ws-framework-server.js"),
     WebsocketFrameworkServer = WfsModule.WebsocketFrameworkServer,
     User = WfsModule.User;
 
-var wfs = new WebsocketFrameworkServer({
+let wfs = new WebsocketFrameworkServer({
     port: 4242,
     onConnection: function(user) {
         console.log("A new user is connected to the server.");
