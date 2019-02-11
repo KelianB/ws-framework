@@ -133,8 +133,8 @@ class WebsocketFrameworkClient {
    * @param {String} reason - The reason for the disconnection.
    */
    closeConnection(reason) {
-      this.connected = false;
       this.sendPacket("close-connection", {reason: reason});
+      this.connected = false;
    }
 
    /** Sends a packet to the server.
