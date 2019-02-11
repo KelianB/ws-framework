@@ -1,9 +1,9 @@
 /** An enumeration of websocket states (CONNECTING, OPEN, CLOSING, CLOSED). */
 const WEBSOCKET_STATE = {
-  CONNECTING: 0,
-  OPEN: 1,
-  CLOSING: 2,
-  CLOSED: 3
+   CONNECTING: 0,
+   OPEN: 1,
+   CLOSING: 2,
+   CLOSED: 3
 };
 
 /** An enumeration of websocket errors (TIMEOUT, CONNECTION_FAILED, UNKNOWN). */
@@ -44,7 +44,7 @@ class WebsocketFrameworkClient {
       };
 
       this.config = {};
-      for(var key in DEFAULT_CONFIG)
+      for(let key in DEFAULT_CONFIG)
          this.config[key] = config[key] || DEFAULT_CONFIG[key];
 
       this.socket = null;
@@ -90,8 +90,8 @@ class WebsocketFrameworkClient {
      }, this.config.abortDelay);
 
      // Add listeners
-     this.socket.onclose = function(e) {that.config.onClose(e);};
-     this.socket.onopen = function(e) {that.config.onOpen(e);};
+     this.socket.onclose = function(e) {self.config.onClose(e);};
+     this.socket.onopen = function(e) {self.config.onOpen(e);};
      this.socket.onerror = function(e) {
          self.config.onError(WEBSOCKET_ERROR.UNKNOWN, e);
          self.connected = false;
@@ -107,7 +107,7 @@ class WebsocketFrameworkClient {
                      self.config.onConnectionSuccessful(packet.data);
 
                      // Start ping interval
-                     if(self.config.pingInterval != that.PING_NEVER)
+                     if(self.config.pingInterval != self.PING_NEVER)
                      	setInterval(self.ping, self.config.pingInterval);
                  }
                  else
@@ -178,6 +178,6 @@ class WebsocketFrameworkClient {
         	}, this.config.timeoutDelay);
    	}
 
-   	that.sendPacket("ping");
+   	this.sendPacket("ping");
    }
 }
