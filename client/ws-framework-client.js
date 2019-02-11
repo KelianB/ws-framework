@@ -23,6 +23,8 @@ const WEBSOCKET_ERROR = {
  * @param {Integer} [config.pingInterval=5000] - The interval at which the client will ping the server, in milliseconds.
  * @param {Integer} [config.abortDelay=10000] - The delay after which the client will abort the connection attempt with the server if it hasn't succeeded, in milliseconds.
  * @param {Integer} [config.timeoutDelay=10000] - The delay after which the client will timeout if the ping hasn't received a response, in milliseconds.
+ * @param {Boolean} [config.logIncomingPackets=true] - Whether or not incoming packets should be logged to the console automatically.
+ * @param {Boolean} [config.logOutgoingPackets=true] - Whether or not outgoing packets should be logged to the console automatically.
  * @param {Function} [config.onClose] - A function that will be called when the connection with the server is closed.
  * @param {Function} [config.onOpen] - A function that will be called when the connection with the server is opened.
  * @param {Function} [config.onError] - A function that will be called if the framework raises an error at any point (params: errorId, [reason]).
@@ -40,12 +42,14 @@ class WebsocketFrameworkClient {
          onOpen: function() {},
          onError: function(error) {},
          onPacket: function() {},
-         onConnectionSuccessful: function() {}
+         onConnectionSuccessful: function() {},
+         logIncomingPackets: true,
+         logOutgoingPackets: true
       };
 
       this.config = {};
       for(let key in DEFAULT_CONFIG)
-         this.config[key] = config[key] || DEFAULT_CONFIG[key];
+         this.config[key] = config.hasOwnProperty(key) ? config[key] : DEFAULT_CONFIG[key];
 
       this.socket = null;
 
@@ -62,9 +66,8 @@ class WebsocketFrameworkClient {
       this.pingTimeout = -1;
 
       // Handle disconnection when the page is left.
-      let self = this;
       window.addEventListener("beforeunload", () => {
-         self.closeConnection("page-exit");
+         this.closeConnection("page-exit");
       });
    }
 
@@ -77,51 +80,52 @@ class WebsocketFrameworkClient {
 
    /** Connects to the server specified in config.server. */
    connect() {
-      let self = this;
-
       // Initialize the socket
      this.socket = new WebSocket(this.wsUri);
 
      // If we're still trying to connect to the server after abortDelay, abort the connection.
      setTimeout(() => {
         	// Check if websocket is still trying
-        	if(self.socket.readyState == WEBSOCKET_STATE.CONNECTING)
-        		self.config.onError(WEBSOCKET_ERROR.CONNECTION_FAILED);
+        	if(this.socket.readyState == WEBSOCKET_STATE.CONNECTING)
+        		this.config.onError(WEBSOCKET_ERROR.CONNECTION_FAILED);
      }, this.config.abortDelay);
 
      // Add listeners
-     this.socket.onclose = function(e) {self.config.onClose(e);};
-     this.socket.onopen = function(e) {self.config.onOpen(e);};
-     this.socket.onerror = function(e) {
-         self.config.onError(WEBSOCKET_ERROR.UNKNOWN, e);
-         self.connected = false;
+     this.socket.onclose = (e) => {this.config.onClose(e);};
+     this.socket.onopen = (e) => {this.config.onOpen(e);};
+     this.socket.onerror = (e) => {
+         this.config.onError(WEBSOCKET_ERROR.UNKNOWN, e);
+         this.connected = false;
      };
-     this.socket.onmessage = function(e) {
+     this.socket.onmessage = (e) => {
          let packet = JSON.parse(e.data);
+
+         if(this.config.logIncomingPackets)
+            console.log("[RECEIVED] " + packet.type);
 
          switch(packet.type) {
          	case "handshake":
          	   if(packet.data.successful) {
-                     self.clientID = packet.data.clientID;
-                     self.connected = true;
-                     self.config.onConnectionSuccessful(packet.data);
+                     this.clientID = packet.data.clientID;
+                     this.connected = true;
+                     this.config.onConnectionSuccessful(packet.data);
 
                      // Start ping interval
-                     if(self.config.pingInterval != self.PING_NEVER)
-                     	setInterval(self.ping, self.config.pingInterval);
+                     if(this.config.pingInterval != this.PING_NEVER)
+                     	setInterval(() => {this.ping()}, this.config.pingInterval);
                  }
                  else
-                     self.config.onError(WEBSOCKET_ERROR.CONNECTION_FAILED, packet.data.reason);
+                     this.config.onError(WEBSOCKET_ERROR.CONNECTION_FAILED, packet.data.reason);
          		break;
              case "pong":
                  // Handle pinging
-             	clearTimeout(self.pingTimeout);
-             	self.pingTimeout = -1;
-             	self.pingHistory.push(Date.now() - self.lastPingTime);
+             	clearTimeout(this.pingTimeout);
+             	this.pingTimeout = -1;
+             	this.pingHistory.push(Date.now() - this.lastPingTime);
              	break;
          }
 
-         self.config.onPacket(packet);
+         this.config.onPacket(packet);
      };
    }
 
@@ -148,7 +152,8 @@ class WebsocketFrameworkClient {
       if(data)
          packet.data = data;
 
-      console.log("[SEND] " + type);
+      if(this.config.logOutgoingPackets)
+         console.log("[SEND] " + type);
 
       try {
          // Send the packet
@@ -171,10 +176,9 @@ class WebsocketFrameworkClient {
 
    	// Creates a timeout that will be cleared when the client receives a "pong" packet from the server.
    	if(this.config.timeoutDelay != this.TIMEOUT_NONE) {
-         let self = this;
          this.pingTimeout = setTimeout(() => {
-        		if(self.connected)
-        			self.config.onError(WEBSOCKET_ERROR.TIMEOUT);
+        		if(this.connected)
+        			this.config.onError(WEBSOCKET_ERROR.TIMEOUT);
         	}, this.config.timeoutDelay);
    	}
 
