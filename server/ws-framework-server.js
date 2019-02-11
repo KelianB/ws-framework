@@ -5,6 +5,8 @@
  * @param {Integer} [config.maxClients=infinite] - The maximum amount of clients connected simultaneously to the server.
  * @param {Integer} config.port - The port that will be used by the server to communicate.
  * @param {Integer} [config.timeoutDelay=5000] - The delay after which a client will timeout if the server hasn't received a ping packet, in milliseconds.
+ * @param {Boolean} [config.logIncomingPackets=true] - Whether or not incoming packets should be logged to the console automatically.
+ * @param {Boolean} [config.logOutgoingPackets=true] - Whether or not outgoing packets should be logged to the console automatically.
  * @param {Function} [config.onConnectionAttempt] - A function that will be called when a client tries to connect (params: user). Can return an object: {successful: true/false, reason: ""}.
  * @param {Function} [config.onConnection] - A function that will be called when the connection with a client has been opened and authorized (params: user).
  * @param {Function} [config.onConnectionClosed] - A function that will be called when the connection with a client has been closed (params: user, data).
@@ -23,12 +25,14 @@ class WebsocketFrameworkServer {
          onConnectionClosed: function() {},
          onServerReady: function() {},
          onPacket: function() {},
-         timeoutDelay: 5000
+         timeoutDelay: 5000,
+         logIncomingPackets: true,
+         logOutgoingPackets: true
       };
 
       this.config = {};
       for(let key in DEFAULT_CONFIG)
-         this.config[key] = config[key] || DEFAULT_CONFIG[key];
+         this.config[key] = config.hasOwnProperty(key) ? config[key] : DEFAULT_CONFIG[key];
 
       this.socket = null;
       this.users = [];
@@ -79,7 +83,9 @@ class WebsocketFrameworkServer {
    }
 
    _onPacketReceived(user, packet) {
-      console.log("[RECEIVED] " + packet);
+      if(this.config.logIncomingPackets)
+         console.log("[RECEIVED] " + packet);
+
       try {
          packet = JSON.parse(packet);
       }
@@ -157,14 +163,17 @@ class User {
       // Build packet object
       let packet = {type: type};
       if(data)
-         packet.data = data;
+         packet.data = data
 
-      console.log("[SEND] " + type + " to " + this.ip);
+      if(this.wfs.config.logOutgoingPackets)
+         console.log("[SEND] " + type + " to " + this.ip);
 
       try {
          this.client.send(JSON.stringify(packet)); // Format and send the packet
       }
-      catch(e) {}
+      catch(e) {
+         console.error(e);
+      }
    }
 
    // Only used internally - called when a ping packet has been received.
@@ -173,7 +182,7 @@ class User {
 
       this.pingTimeout = setTimeout(() => {
          // Remove client
-          this.wfs.removeUser(this, {reason: "timeout"});
+         this.wfs.removeUser(this, {reason: "timeout"});
          console.log(this.ip + " timed out!");
       }, this.wfs.config.timeoutDelay)
    }
